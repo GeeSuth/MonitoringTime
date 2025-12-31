@@ -34,11 +34,11 @@ class FloatingWidget(tk.Toplevel):
         # Window configuration
         self.overrideredirect(True)  # Remove window decorations
         self.attributes('-topmost', True)  # Always on top
-        self.attributes('-alpha', 0.9)  # Slightly transparent
+        self.attributes('-alpha', 0.95)  # Slightly transparent
         
         # Position in top-right corner
         screen_width = self.winfo_screenwidth()
-        self.geometry(f"280x120+{screen_width-300}+20")
+        self.geometry(f"280x350+{screen_width-300}+20")
         
         # Make draggable
         self.bind('<Button-1>', self.start_move)
@@ -50,51 +50,145 @@ class FloatingWidget(tk.Toplevel):
         
         # Task name
         self.task_label = tk.Label(
-            self.main_frame,
-            text="No Task",
-            font=('Arial', 10, 'bold'),
-            bg='#2d3748',
-            fg='#ffffff'
+            self.main_frame, text="No Task", font=('Arial', 10, 'bold'),
+            bg='#2d3748', fg='#ffffff'
         )
         self.task_label.pack(pady=(8, 2))
         
         # Timer
         self.timer_label = tk.Label(
-            self.main_frame,
-            text="00:00:00",
-            font=('Arial', 20, 'bold'),
-            bg='#2d3748',
-            fg='#4fd1c5'
+            self.main_frame, text="00:00:00", font=('Arial', 20, 'bold'),
+            bg='#2d3748', fg='#4fd1c5'
         )
         self.timer_label.pack(pady=2)
         
         # Remaining time
         self.remaining_label = tk.Label(
-            self.main_frame,
-            text="",
-            font=('Arial', 8),
-            bg='#2d3748',
-            fg='#a0aec0'
+            self.main_frame, text="", font=('Arial', 8),
+            bg='#2d3748', fg='#a0aec0'
         )
         self.remaining_label.pack(pady=2)
         
         # Progress bar
         self.progress_canvas = tk.Canvas(
-            self.main_frame,
-            height=8,
-            bg='#1a202c',
-            highlightthickness=0
+            self.main_frame, height=8, bg='#1a202c', highlightthickness=0
         )
         self.progress_canvas.pack(fill='x', padx=10, pady=(0, 5))
+
+        # Separator
+        ttk.Separator(self.main_frame, orient='horizontal').pack(fill='x', padx=10, pady=5)
+
+        # --- Subtasks ---
+        subtask_container = tk.Frame(self.main_frame, bg='#2d3748')
+        subtask_container.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+        # Subtask Add
+        add_frame = tk.Frame(subtask_container, bg='#2d3748')
+        add_frame.pack(fill='x', pady=5)
+        self.new_subtask_entry = tk.Entry(
+            add_frame, font=('Arial', 9), bg='#1a202c', fg='white',
+            insertbackground='white', bd=1, relief='solid'
+        )
+        self.new_subtask_entry.pack(side='left', fill='x', expand=True, ipady=3)
+        self.new_subtask_entry.bind("<Return>", lambda e: self.add_subtask())
+
+        # Subtask List
+        self.subtask_canvas = tk.Canvas(
+            subtask_container, bg='#2d3748', highlightthickness=0
+        )
+        self.subtask_scrollbar = ttk.Scrollbar(
+            subtask_container, orient='vertical', command=self.subtask_canvas.yview
+        )
+        self.subtask_list_frame = tk.Frame(self.subtask_canvas, bg='#2d3748')
+
+        self.subtask_list_frame.bind(
+            '<Configure>',
+            lambda e: self.subtask_canvas.configure(scrollregion=self.subtask_canvas.bbox('all'))
+        )
+        self.subtask_canvas.create_window((0, 0), window=self.subtask_list_frame, anchor='nw')
+        self.subtask_canvas.configure(yscrollcommand=self.subtask_scrollbar.set)
+        
+        self.subtask_canvas.pack(side='left', fill='both', expand=True)
+        self.subtask_scrollbar.pack(side='right', fill='y')
         
         # Bind right-click menu to all major widgets
         for widget in [self.main_frame, self.task_label, self.timer_label, 
-                       self.remaining_label, self.progress_canvas]:
+                       self.remaining_label, self.progress_canvas, self.subtask_canvas]:
             widget.bind('<Button-3>', self.show_task_menu)
         
         # For dragging
         self.x = 0
         self.y = 0
+        self.current_subtasks_cache = []
+        self.current_task_name_cache = ""
+
+    def add_subtask(self):
+        subtask_name = self.new_subtask_entry.get().strip()
+        if not subtask_name:
+            return
+            
+        task = self.app.tasks[self.app.current_task_index]
+        if 'subtasks' not in task:
+            task['subtasks'] = []
+            
+        task['subtasks'].append({'name': subtask_name, 'completed': False})
+        self.new_subtask_entry.delete(0, 'end')
+        self.render_subtasks(task)
+
+    def render_subtasks(self, task):
+        for widget in self.subtask_list_frame.winfo_children():
+            widget.destroy()
+
+        if 'subtasks' not in task or not task['subtasks']:
+            tk.Label(
+                self.subtask_list_frame, text="No subtasks yet.", 
+                bg='#2d3748', fg='#a0aec0', font=('Arial', 8)
+            ).pack(pady=10)
+            return
+
+        for i, subtask in enumerate(task['subtasks']):
+            subtask_frame = tk.Frame(self.subtask_list_frame, bg='#2d3748')
+            subtask_frame.pack(fill='x', anchor='w', pady=1)
+
+            def toggle_subtask_handler(event=None, idx=i):
+                task['subtasks'][idx]['completed'] = not task['subtasks'][idx]['completed']
+                self.render_subtasks(task)
+
+            if subtask['completed']:
+                checkmark_text = "✓"
+                fg_color = '#718096'
+                font_config = ('Arial', 9, 'overstrike')
+            else:
+                checkmark_text = "○"
+                fg_color = '#a0aec0'
+                font_config = ('Arial', 9)
+
+            checkmark_label = tk.Label(
+                subtask_frame, text=checkmark_text, font=('Arial', 12),
+                bg='#2d3748', fg='#4fd1c5', padx=5
+            )
+            checkmark_label.pack(side='left')
+            checkmark_label.bind("<Button-1>", toggle_subtask_handler)
+            
+            text_label = tk.Label(
+                subtask_frame, text=subtask['name'], font=font_config,
+                fg=fg_color, bg='#2d3748', anchor='w', justify='left'
+            )
+            text_label.pack(side='left', fill='x', expand=True)
+            text_label.bind("<Button-1>", toggle_subtask_handler)
+
+            delete_btn = tk.Button(
+                subtask_frame, text="✕", font=('Arial', 8),
+                bg='#2d3748', fg='#c53030', bd=0,
+                activebackground='#2d3748', activeforeground='#fc8181',
+                cursor='hand2', command=lambda idx=i: self.delete_subtask(task, idx)
+            )
+            delete_btn.pack(side='right', padx=5)
+
+    def delete_subtask(self, task, index):
+        if messagebox.askyesno("Confirm", "Delete this subtask?", parent=self):
+            task['subtasks'].pop(index)
+            self.render_subtasks(task)
         
     def start_move(self, event):
         self.x = event.x
@@ -135,8 +229,11 @@ class FloatingWidget(tk.Toplevel):
         finally:
             task_menu.grab_release()
 
-    def update_display(self, task_name, elapsed_seconds, planned_minutes, is_running):
+    def update_display(self, task, elapsed_seconds, is_running):
         """Update widget display"""
+        task_name = task['name']
+        planned_minutes = task['minutes']
+
         self.task_label.config(text=task_name[:25])
         
         # Format timer
@@ -164,43 +261,29 @@ class FloatingWidget(tk.Toplevel):
             # Flash effect when time exceeded
             if elapsed_seconds % 2 == 0:
                 self.main_frame.config(bg='#742a2a')
-                self.task_label.config(bg='#742a2a')
-                self.timer_label.config(bg='#742a2a')
-                self.remaining_label.config(bg='#742a2a')
+                for w in [self.task_label, self.timer_label, self.remaining_label]:
+                    w.config(bg='#742a2a')
             else:
                 self.main_frame.config(bg='#2d3748')
-                self.task_label.config(bg='#2d3748')
-                self.timer_label.config(bg='#2d3748')
-                self.remaining_label.config(bg='#2d3748')
+                for w in [self.task_label, self.timer_label, self.remaining_label]:
+                    w.config(bg='#2d3748')
         
         # Update progress bar
-        if planned_seconds > 0:
-            progress_percent = min((elapsed_seconds / planned_seconds), 1.0)
-        else:
-            progress_percent = 0
-
+        progress_percent = min((elapsed_seconds / planned_seconds), 1.0) if planned_seconds > 0 else 0
         width = self.progress_canvas.winfo_width()
-        
         self.progress_canvas.delete('all')
-        
-        # Background
-        self.progress_canvas.create_rectangle(
-            0, 0, width, 8,
-            fill='#1a202c',
-            outline=''
-        )
-        
-        # Progress fill
+        self.progress_canvas.create_rectangle(0, 0, width, 8, fill='#1a202c', outline='')
         fill_color = '#fc8181' if remaining < 0 else '#4fd1c5'
         self.progress_canvas.create_rectangle(
-            0, 0, width * progress_percent, 8,
-            fill=fill_color,
-            outline=''
+            0, 0, width * progress_percent, 8, fill=fill_color, outline=''
         )
         
-        # Update pause button
-        # self.pause_btn.config(text="Resume" if not is_running else "Pause")
-
+        # Update subtasks if needed
+        subtasks_json = json.dumps(task.get('subtasks', []))
+        if task_name != self.current_task_name_cache or subtasks_json != self.current_subtasks_cache:
+            self.current_task_name_cache = task_name
+            self.current_subtasks_cache = subtasks_json
+            self.render_subtasks(task)
 
 
 class TimeTrackerApp:
@@ -294,6 +377,17 @@ class TimeTrackerApp:
                 completed BOOLEAN,
                 processes TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sub_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_task_id INTEGER,
+                name TEXT NOT NULL,
+                completed BOOLEAN NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_task_id) REFERENCES session_tasks(id) ON DELETE CASCADE
             )
         ''')
         
@@ -632,7 +726,7 @@ class TimeTrackerApp:
                     name = entries[0].get().strip()
                     minutes = int(entries[1].get())
                     if name and minutes > 0:
-                        tasks.append({'name': name, 'minutes': minutes})
+                        tasks.append({'name': name, 'minutes': minutes, 'subtasks': []})
                 except ValueError:
                     pass
         return tasks
@@ -663,10 +757,10 @@ class TimeTrackerApp:
                 f"The total time for tasks ({sum_task_minutes} minutes) does not match "
                 f"the session duration ({int(total_minutes)} minutes).\n\n"
                 f"Difference: {diff} minutes.\n\n"
-                "Please adjust task times or the session end time."
+                "Do you want to start the session anyway?"
             )
-            messagebox.showerror("Time Mismatch", message)
-            return
+            if not messagebox.askyesno("Time Mismatch", message, parent=setup_window):
+                return
 
         self.total_minutes = total_minutes
         self.end_time = end_time
@@ -746,9 +840,8 @@ class TimeTrackerApp:
         
         if self.floating_widget and self.floating_widget.winfo_exists():
             self.floating_widget.update_display(
-                task['name'],
+                task,
                 self.elapsed_seconds,
-                task['minutes'],
                 self.is_running
             )
             
@@ -918,6 +1011,16 @@ class TimeTrackerApp:
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (self.session_id, task['name'], task['minutes'], 
                   actual_seconds, i <= self.current_task_index, processes))
+            
+            session_task_id = cursor.lastrowid
+            
+            subtasks = task.get('subtasks', [])
+            if subtasks:
+                for subtask in subtasks:
+                    cursor.execute('''
+                        INSERT INTO sub_tasks (session_task_id, name, completed)
+                        VALUES (?, ?, ?)
+                    ''', (session_task_id, subtask['name'], subtask['completed']))
                   
         cursor.execute('''
             UPDATE sessions SET end_time = ? WHERE id = ?
@@ -1071,12 +1174,37 @@ class TimeTrackerApp:
         .progress-exceeded {{
             background: linear-gradient(90deg, #fc8181, #f56565) !important;
         }}
+        .subtasks {{
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 13px;
+            color: #4a5568;
+            margin-top: 15px;
+        }}
+        .subtasks-title {{
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #2d3748;
+        }}
+        .subtask-item {{
+            padding: 5px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }}
+        .subtask-item:last-child {{
+            border-bottom: none;
+        }}
+        .subtask-item.completed {{
+            text-decoration: line-through;
+            color: #a0aec0;
+        }}
         .processes {{
             background: #f7fafc;
             padding: 15px;
             border-radius: 10px;
             font-size: 13px;
             color: #4a5568;
+            margin-top: 15px;
         }}
         .processes-title {{
             font-weight: bold;
@@ -1129,7 +1257,7 @@ class TimeTrackerApp:
                 
             actual_minutes = actual_seconds / 60
             planned_minutes = task['minutes']
-            progress_percent = (actual_minutes / planned_minutes) * 100
+            progress_percent = (actual_minutes / planned_minutes) * 100 if planned_minutes > 0 else 0
             
             if i < self.current_task_index:
                 status = '<span class="task-status status-completed">✓ Completed</span>'
@@ -1155,6 +1283,22 @@ class TimeTrackerApp:
                 for proc, count in top_processes:
                     process_html += f'<div class="process-item">• {proc} <span style="color: #a0aec0;">({count} times)</span></div>'
                 process_html += '</div>'
+
+            # Subtasks HTML
+            subtasks = task.get('subtasks', [])
+            subtasks_html = ""
+            if subtasks:
+                completed_count = sum(1 for s in subtasks if s['completed'])
+                subtasks_html = f'''
+                <div class="subtasks">
+                    <div class="subtasks-title">Subtasks ({completed_count}/{len(subtasks)} completed)</div>
+                '''
+                for subtask in subtasks:
+                    if subtask['completed']:
+                        subtasks_html += f'<div class="subtask-item completed">✓ {subtask["name"]}</div>'
+                    else:
+                        subtasks_html += f'<div class="subtask-item">○ {subtask["name"]}</div>'
+                subtasks_html += '</div>'
             
             html_content += f"""
             <div class="task-item">
@@ -1170,6 +1314,7 @@ class TimeTrackerApp:
                 <div class="progress-bar">
                     <div class="progress-fill {exceeded_class}" style="width: {min(progress_percent, 100)}%"></div>
                 </div>
+                {subtasks_html}
                 {process_html}
             </div>
 """
