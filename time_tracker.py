@@ -306,6 +306,8 @@ class TimeTrackerApp:
         self.session_start_time = None
         self.session_id = None
         self.process_tracking = {}
+        self.setup_session_minutes = 0
+        self.setup_total_task_minutes = 0
         
         # Tracking thread
         self.tracking_thread = None
@@ -434,6 +436,14 @@ class TimeTrackerApp:
         except (ValueError, IndexError):
             return None
 
+    def _update_remaining_time(self):
+        remaining = int(self.setup_session_minutes - self.setup_total_task_minutes)
+        
+        text = f"Unallocated Time: {remaining} min"
+        color = '#2d3748' if remaining >= 0 else '#c53030'
+        
+        self.remaining_time_label.config(text=text, fg=color)
+
     def show_setup_dialog(self):
         """Show initial setup dialog"""
         setup_window = tk.Toplevel(self.root)
@@ -504,6 +514,15 @@ class TimeTrackerApp:
         )
         duration_label.pack(side='left', padx=10)
 
+        self.remaining_time_label = tk.Label(
+            content,
+            text="Unallocated Time: 0 min",
+            font=('Arial', 10, 'bold'),
+            bg='#f7fafc',
+            fg='#2d3748'
+        )
+        self.remaining_time_label.pack(anchor='w', pady=(5, 5))
+
         def update_duration_label(*args):
             try:
                 h = hour_cb.get()
@@ -516,6 +535,7 @@ class TimeTrackerApp:
                 if end_time:
                     duration = end_time - datetime.now()
                     total_minutes = duration.total_seconds() / 60
+                    self.setup_session_minutes = total_minutes
                     if total_minutes > 0:
                         hours = int(total_minutes / 60)
                         minutes = int(total_minutes % 60)
@@ -523,16 +543,18 @@ class TimeTrackerApp:
                     else:
                         duration_label.config(text="(in the past!)")
                 else:
+                    self.setup_session_minutes = 0
                     duration_label.config(text="(invalid time)")
             except (ValueError, tk.TclError):
+                 self.setup_session_minutes = 0
                  duration_label.config(text="(invalid time)")
+            self._update_remaining_time()
 
 
         hour_cb.bind("<<ComboboxSelected>>", update_duration_label)
         minute_cb.bind("<<ComboboxSelected>>", update_duration_label)
         minute_cb.bind("<KeyRelease>", update_duration_label)
         ampm_cb.bind("<<ComboboxSelected>>", update_duration_label)
-        update_duration_label()
         
         # Load templates button
         tk.Button(
@@ -621,23 +643,33 @@ class TimeTrackerApp:
             command=lambda: self.start_from_setup(setup_window, f"{hour_cb.get()}:{minute_cb.get()} {ampm_cb.get()}", task_list_frame)
         ).pack(side='right', padx=(5, 20))
         
-        # Add initial task row
-        self.add_task_row_setup(task_list_frame)
-        
+        # Add initial task row and update labels
+        self.add_task_row_setup(task_list_frame, name="First Task")
+        update_duration_label()
+
         setup_window.protocol("WM_DELETE_WINDOW", self.quit_app)
         
-    def add_task_row_setup(self, parent):
+    def add_task_row_setup(self, parent, name="", minutes="30"):
         """Add task row in setup dialog"""
         row = tk.Frame(parent, bg='white', pady=5, padx=10)
         row.pack(fill='x', pady=2)
         
-        tk.Entry(row, font=('Arial', 10), width=25).pack(side='left', padx=5)
+        name_entry = tk.Entry(row, font=('Arial', 10), width=25)
+        name_entry.insert(0, name)
+        name_entry.pack(side='left', padx=5)
+        
         tk.Label(row, text="min:", bg='white', font=('Arial', 9)).pack(side='left')
         
         minutes_entry = tk.Entry(row, font=('Arial', 10), width=8)
-        minutes_entry.insert(0, "30")
+        minutes_entry.insert(0, minutes)
         minutes_entry.pack(side='left', padx=5)
-        
+        minutes_entry.bind("<KeyRelease>", lambda e: self._update_total_task_minutes(parent)) # Bind KeyRelease
+
+        # Using a wrapper function to pass task_list_frame
+        def delete_row_and_update():
+            row.destroy()
+            self._update_total_task_minutes(parent)
+
         tk.Button(
             row,
             text="✕",
@@ -648,8 +680,10 @@ class TimeTrackerApp:
             padx=8,
             pady=2,
             cursor='hand2',
-            command=row.destroy
+            command=delete_row_and_update
         ).pack(side='left', padx=5)
+
+        self._update_total_task_minutes(parent) # Update after adding a new row
         
     def load_templates_to_setup(self, task_list_frame):
         """Load templates into setup dialog"""
@@ -669,31 +703,22 @@ class TimeTrackerApp:
             
         # Load templates
         for name, minutes in templates:
-            row = tk.Frame(task_list_frame, bg='white', pady=5, padx=10)
-            row.pack(fill='x', pady=2)
+            # Re-use add_task_row_setup with loaded data
+            self.add_task_row_setup(task_list_frame, name=name, minutes=str(minutes))
             
-            name_entry = tk.Entry(row, font=('Arial', 10), width=25)
-            name_entry.insert(0, name)
-            name_entry.pack(side='left', padx=5)
+        self._update_total_task_minutes(task_list_frame) # Update after loading templates
             
-            tk.Label(row, text="min:", bg='white', font=('Arial', 9)).pack(side='left')
-            
-            minutes_entry = tk.Entry(row, font=('Arial', 10), width=8)
-            minutes_entry.insert(0, str(minutes))
-            minutes_entry.pack(side='left', padx=5)
-            
-            tk.Button(
-                row,
-                text="✕",
-                font=('Arial', 10),
-                bg='#fed7d7',
-                fg='#c53030',
-                bd=0,
-                padx=8,
-                pady=2,
-                cursor='hand2',
-                command=row.destroy
-            ).pack(side='left', padx=5)
+    def _update_total_task_minutes(self, task_list_frame):
+        total_minutes = 0
+        for row in task_list_frame.winfo_children():
+            entries = [w for w in row.winfo_children() if isinstance(w, tk.Entry)]
+            if len(entries) >= 2: # Assuming the second Entry is minutes
+                try:
+                    total_minutes += int(entries[1].get())
+                except ValueError:
+                    pass
+        self.setup_total_task_minutes = total_minutes
+        self._update_remaining_time()
             
     def save_template_from_setup(self, task_list_frame):
         """Save tasks as template"""
